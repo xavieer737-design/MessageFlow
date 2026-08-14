@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+backend/uploads/
+backend/uploads-test/
+
+# Environment
+.env
+.env.local
+
+# Frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Local PostgreSQL data (sandbox/dev only — never commit)
+.pgdata/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
