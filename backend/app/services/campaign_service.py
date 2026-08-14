@@ -425,6 +425,13 @@ def pause_campaign(db: Session, user_id: int, campaign: Campaign) -> Campaign:
     if campaign.status not in ("READY", "RUNNING", "SCHEDULED"):
         raise CampaignError(f"Cannot pause a campaign in status {campaign.status}.", 409)
     campaign.status = "PAUSED"
+    # Phase 2: pause the send queue so no new commands are issued.
+    from app.services.send_service import SendError, pause_send_job
+
+    try:
+        pause_send_job(db, user_id, campaign)
+    except SendError as exc:
+        raise CampaignError(exc.message, exc.status_code) from exc
     log_action(db, user_id, "campaign.paused", "campaign", campaign.id)
     return campaign
 
@@ -434,7 +441,11 @@ def resume_campaign(db: Session, user_id: int, campaign: Campaign) -> Campaign:
         raise CampaignError("Campaign not found.", 404)
     if campaign.status != "PAUSED":
         raise CampaignError(f"Cannot resume a campaign in status {campaign.status}.", 409)
-    campaign.status = "READY"
+    # Phase 2: if there is a send job, resuming returns it to RUNNING.
+    from app.services.send_service import SendError, resume_send_job
+
+    job = resume_send_job(db, user_id, campaign)
+    campaign.status = "RUNNING" if job is not None else "READY"
     log_action(db, user_id, "campaign.resumed", "campaign", campaign.id)
     return campaign
 
@@ -475,6 +486,8 @@ def campaign_summary(db: Session, campaign: Campaign) -> dict:
         "sent_count": counts.get("SENT", 0),
         "failed_count": counts.get("FAILED", 0),
         "pending_count": counts.get("PENDING", 0),
+        "processing_count": counts.get("PROCESSING", 0),
+        "queued_count": counts.get("QUEUED", 0),
         "skipped_count": counts.get("SKIPPED", 0),
         "opted_out_count": counts.get("OPTED_OUT", 0),
     }

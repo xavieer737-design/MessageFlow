@@ -3,6 +3,12 @@
 PostgreSQL ≥ 14. Migrations managed with Alembic (`backend/alembic/`).
 Initial migration: `c86a3a9d1076_initial_schema`.
 
+## Migrations
+
+- `c86a3a9d1076_initial_schema` — Phase 1
+- `9bfd64b68082_phase2_devices_pairing_send_jobs` — Phase 2 (non-destructive:
+  adds columns/tables only)
+
 ## Tables
 
 ### users
@@ -59,6 +65,9 @@ CASCADE.
 | created_at / updated_at | timestamptz | |
 
 ### campaign_recipients
+Phase 2 additions: `message_id` (uuid when queued), `queued_at`, `sent_at`,
+`attempt_count`; statuses include `PROCESSING` (command dispatched, awaiting
+the device's result).
 `id`, `campaign_id` FK (CASCADE, indexed), `contact_id` FK (SET NULL,
 indexed), `personalized_message` text, `status` varchar(20) (PENDING \| QUEUED
 \| SENT \| FAILED \| SKIPPED \| OPTED_OUT, indexed), `error` varchar(500),
@@ -67,8 +76,30 @@ timestamps.
 ### devices
 `id`, `user_id` FK (CASCADE), `device_name`, `device_identifier`
 (unique per user), `platform` (default `android`), `connection_status`
-(DISCONNECTED \| CONNECTING \| CONNECTED \| OFFLINE \| ERROR), `last_seen`
-timestamptz (nullable), timestamps. Phase 1 stores registrations only.
+(DISCONNECTED \| CONNECTING \| CONNECTED \| OFFLINE \| ERROR), `public_key`
+(text, device's Keystore public key), `paired_at`, `last_seen`,
+telemetry (`phone_model`, `android_version`, `app_version`, `battery_level`,
+`sim_state`, `network_state`), timestamps. CONNECTED only after
+authenticated WebSocket communication.
+
+### pairing_sessions
+`id`, `user_id` FK, `token_hash` (SHA-256, unique), `device_name`,
+`device_identifier`, `expires_at`, `consumed_at` (one-time use),
+`device_id` FK (SET NULL), `created_at`.
+
+### send_jobs
+`id`, `user_id` FK, `campaign_id` FK (unique — one job per campaign),
+`device_id` FK, `status` (ACTIVE \| PAUSED \| COMPLETED \| CANCELLED \| ERROR),
+`batch_size`, `rate_per_minute`, `total_recipients`, `started_at`,
+`completed_at`, timestamps.
+
+### message_attempts
+`id`, `user_id` FK, `campaign_id` FK (nullable — test messages), `recipient_id`
+FK (SET NULL), `contact_id` FK, `device_id` FK, `phone`, `message`,
+`message_id` (uuid, unique), `idempotency_key` (unique — `c{campaign}:r{recipient}`
+or `test:{message_id}`), `status` (PENDING \| SEND_REQUESTED \| SEND_SUCCESS \|
+SEND_FAILED \| SKIPPED \| OPTED_OUT), `error`, `attempt_number`, `sent_at`,
+`device_timestamp`, timestamps.
 
 ### message_logs
 `id`, `user_id` FK (CASCADE, indexed), `campaign_id` FK (SET NULL), `contact_id`

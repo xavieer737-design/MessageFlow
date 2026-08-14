@@ -75,6 +75,8 @@ Supported variables: `first_name`, `last_name`, `phone`, `email`, `company`, `no
 | PUT | `/campaigns/{id}` | edit DRAFT only; status changes via dedicated endpoints |
 | DELETE | `/campaigns/{id}` | `204` |
 | POST | `/campaigns/{id}/validate` | regenerates recipients + message logs; returns `ValidationReport` |
+| POST | `/campaigns/{id}/send` | `{device_id}` → 202 `{job_id, queued, skipped_opted_out, skipped_invalid, message}` — re-checks opt-outs NOW, queues recipients, dispatches first batch |
+| GET | `/campaigns/{id}/progress` | `{total, pending, queued, processing, sent, failed, skipped, opted_out, progress, device…}` — poll for live updates |
 | POST | `/campaigns/{id}/ready` | validate & mark READY (422 if validation fails) |
 | POST | `/campaigns/{id}/duplicate` | 201 copy as DRAFT |
 | POST | `/campaigns/{id}/pause` | READY/SCHEDULED/RUNNING → PAUSED |
@@ -90,10 +92,31 @@ infos[], previews[{contact_id, name, phone, preview, status, error}]}`.
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| GET | `/devices` | list (real registrations only) |
-| POST | `/devices/register` | `{device_name, device_identifier, platform}` → 201 DISCONNECTED |
-| POST | `/devices/{id}/heartbeat` | `{device_identifier}` updates `last_seen` (mismatch → 403) |
+| GET | `/devices` | list with telemetry + real counters (`is_online`, battery, SIM, queued/sent/failed) |
+| POST | `/devices/register` | legacy Phase 1 registration (never marks connected) |
+| POST | `/devices/pairing/start` | `{device_name, device_identifier}` → `{session_id, token, qr_payload, expires_at}` (one-time, 5 min) |
+| POST | `/devices/pairing/complete` | `{token, device_name, device_identifier, public_key, …}` → `{device, device_token}` — called by the Android app; 409 replay / 410 expired |
+| GET | `/devices/pairing/{session_id}` | dashboard polling: `pending \| expired \| paired` |
+| POST | `/devices/{id}/heartbeat` | telemetry: `{device_identifier, battery_level?, sim_state?, network_state?, app_version?, phone_model?, android_version?}` |
+| POST | `/devices/{id}/disconnect` | explicit disconnect (user action) |
+| POST | `/devices/{id}/test-message` | `{phone, message}` → 202 `{message_id, status=SEND_REQUESTED,…}` (requires connected device) |
+| GET | `/devices/{id}/test-message/{message_id}` | real result: `SEND_SUCCESS \| SEND_FAILED` + error |
 | DELETE | `/devices/{id}` | `204` |
+| WS | `/devices/ws` | device WebSocket (see protocol below) |
+
+### Device WebSocket protocol
+
+```
+Server → {type: challenge, nonce}
+Client → {type: auth, device_id, token, signature}   # SHA256withRSA over nonce
+Server → {type: welcome, device_id}  (else close 4001/4003)
+Client → {type: heartbeat, battery_level?, sim_state?, network_state?, app_version?}
+Client → {type: message_result, message_id, status: SEND_SUCCESS|SEND_FAILED, error?, timestamp?}
+Client → {type: incoming_sms, sender, body, received_at?}   (opt-in only)
+Server → {type: send_message, command_id, message_id, idempotency_key, phone, message, send_at, test?}
+Server → {type: pause} | {type: resume} | {type: cancel} | {type: disconnect} | {type: ping}
+Server → {type: result_ack} | {type: heartbeat_ack} | {type: incoming_sms_ack} | {type: error}
+```
 
 ## Messages
 

@@ -61,3 +61,25 @@ def decode_token(token: str, expected_type: str | None = None) -> dict | None:
     if expected_type is not None and payload.get("type") != expected_type:
         return None
     return payload
+
+
+# --- Device tokens (Phase 2) ---
+
+
+def create_device_token(device_id: int, user_id: int, device_identifier: str) -> str:
+    """Short-lived JWT authenticating a paired Android device over the
+    WebSocket. Bound to the device record and its owner."""
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(device_id),
+        "type": "device",
+        "uid": user_id,
+        "did": device_identifier,
+        "iat": now,
+        "exp": now + timedelta(days=settings.DEVICE_TOKEN_EXPIRE_DAYS),
+    }
+    return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+
+
+def decode_device_token(token: str) -> dict | None:
+    return decode_token(token, "device")

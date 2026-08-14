@@ -12,6 +12,9 @@ os.environ.setdefault("RATE_LIMIT_AUTH", "1000/minute")
 os.environ.setdefault("RATE_LIMIT_IMPORT", "1000/minute")
 os.environ.setdefault("UPLOAD_DIR", "uploads-test")
 os.environ.setdefault("JWT_SECRET", "test-secret-not-for-production")
+# Phase 2: background dispatch/offline loops are exercised directly in
+# tests; the async loop must not race against fixtures.
+os.environ.setdefault("SEND_DISPATCH_ENABLED", "false")
 
 import pytest
 from fastapi.testclient import TestClient

@@ -3,6 +3,8 @@
 import { api } from '../lib/api'
 import type {
   Campaign,
+  CampaignProgress,
+  CampaignSendResult,
   CampaignValidationReport,
   CampaignStatus,
   Contact,
@@ -17,7 +19,10 @@ import type {
   MessageTemplate,
   OptOut,
   Paginated,
+  PairingStart,
+  PairingStatus,
   RecipientTarget,
+  TestMessageResult,
   User,
 } from '../types'
 
@@ -139,6 +144,10 @@ export const campaignsApi = {
   update: (id: number, payload: Record<string, unknown>) =>
     api.put<Campaign>(`/campaigns/${id}`, payload).then((r) => r.data),
   remove: (id: number) => api.delete(`/campaigns/${id}`).then((r) => r.data),
+  send: (id: number, device_id: number) =>
+    api.post<CampaignSendResult>(`/campaigns/${id}/send`, { device_id }).then((r) => r.data),
+  progress: (id: number) =>
+    api.get<CampaignProgress>(`/campaigns/${id}/progress`).then((r) => r.data),
   validate: (id: number) =>
     api.post<CampaignValidationReport>(`/campaigns/${id}/validate`).then((r) => r.data),
   markReady: (id: number) => api.post<Campaign>(`/campaigns/${id}/ready`).then((r) => r.data),
@@ -155,6 +164,15 @@ export const devicesApi = {
   register: (payload: { device_name: string; device_identifier: string; platform: string }) =>
     api.post<Device>('/devices/register', payload).then((r) => r.data),
   remove: (id: number) => api.delete(`/devices/${id}`).then((r) => r.data),
+  disconnect: (id: number) => api.post<Device>(`/devices/${id}/disconnect`).then((r) => r.data),
+  pairingStart: (payload: { device_name: string; device_identifier: string }) =>
+    api.post<PairingStart>('/devices/pairing/start', payload).then((r) => r.data),
+  pairingStatus: (sessionId: number) =>
+    api.get<PairingStatus>(`/devices/pairing/${sessionId}`).then((r) => r.data),
+  testMessage: (deviceId: number, payload: { phone: string; message: string }) =>
+    api.post<TestMessageResult>(`/devices/${deviceId}/test-message`, payload).then((r) => r.data),
+  testMessageResult: (deviceId: number, messageId: string) =>
+    api.get<TestMessageResult>(`/devices/${deviceId}/test-message/${messageId}`).then((r) => r.data),
 }
 
 // --- Messages ---

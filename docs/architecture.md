@@ -2,9 +2,9 @@
 
 ## High-level
 
-MessageFlow is a desktop-first web application with a React SPA frontend and
-a Python FastAPI backend backed by PostgreSQL. Phase 1 implements everything
-up to *sending*; the Android sending path is designed for but not built yet.
+MessageFlow is a desktop-first web application with a React SPA frontend,
+a Python FastAPI backend backed by PostgreSQL, and (Phase 2) an Android
+companion app that performs actual SMS sending through the phone's SIM.
 
 ```
 Browser (React SPA, :5173)
@@ -12,12 +12,25 @@ Browser (React SPA, :5173)
    ▼
 FastAPI (uvicorn, :8000) ── CORS for configured origins only
    │
-   ├── app/api/routes     HTTP layer (auth, validation, status codes, rate limits)
-   ├── app/services       business logic (phone, SMS, templates, campaigns, import)
-   ├── app/repositories   user-scoped data access (isolation by construction)
-   ├── app/models         SQLAlchemy 2.0 models
-   └── app/db             engine + session (PostgreSQL in prod, SQLite in tests)
+   ├── app/api/routes        HTTP + WebSocket layer (incl. /devices/ws)
+   ├── app/services          business logic (phone, SMS, templates,
+   │                         campaigns, import, pairing, send engine)
+   ├── app/services/connection_manager.py   in-memory WS registry
+   ├── app/core/background.py               dispatch + offline sweep loops
+   ├── app/repositories      user-scoped data access (isolation by construction)
+   ├── app/models            SQLAlchemy 2.0 models
+   └── app/db                engine + session (PostgreSQL in prod, SQLite in tests)
+
+Android app (android/, Kotlin + Compose)
+   │  WSS /api/devices/ws (device JWT + RSA challenge-response)
+   ▼
+SmsManager → SIM → recipient
 ```
+
+The backend is the coordination layer: it owns the send queue (batches,
+pacing, opt-out re-checks, idempotency) and only records results the device
+reports. The Android app is a thin executor with an encrypted idempotency
+store to guarantee no double-sending across reconnects.
 
 ## Frontend
 
@@ -48,6 +61,32 @@ FastAPI (uvicorn, :8000) ── CORS for configured origins only
   returns full counts. XLSX handled by openpyxl through pandas.
 
 ## Key flows
+
+### Device lifecycle (Phase 2)
+
+```
+pairing/start (QR, 5 min one-time token)
+   → pairing/complete (device public key) → DISCONNECTED (paired)
+   → WS auth (challenge + signature)      → CONNECTED
+   → heartbeat timeout / WS close         → OFFLINE
+   → user action                          → DISCONNECTED
+```
+
+### Campaign send lifecycle (Phase 2)
+
+```
+READY --send(device)--> RUNNING (SendJob ACTIVE)
+  dispatch loop: next batch (≤ SEND_BATCH_SIZE) with pacing
+  device → message_result(SEND_SUCCESS|SEND_FAILED)
+  attempt/recipient/MessageLog updated; next batch; COMPLETED when done
+PAUSED  = no new commands (in-flight completes, results still recorded)
+CANCELLED = terminal, no new commands
+```
+
+Idempotency: every recipient has a stable `idempotency_key` and per-attempt
+`message_id`. The device stores (message_id → result) encrypted; a repeated
+command replays the stored result instead of re-sending. If a result is lost
+in transit, the server re-issues the SAME message_id on reconnect.
 
 ### Campaign lifecycle (Phase 1)
 

@@ -4,18 +4,23 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.db.session import get_db
-from app.models import Campaign, User
+from app.models import Campaign, Device, User
 from app.repositories.campaign_repo import CampaignRepository
+from app.repositories.device_repo import DeviceRepository
 from app.schemas.campaign import (
     CampaignCreate,
     CampaignListOut,
     CampaignOut,
+    CampaignProgressOut,
+    CampaignSendOut,
+    CampaignSendRequest,
     CampaignUpdate,
     CampaignValidationReport,
 )
-from app.services import campaign_service
+from app.services import campaign_service, send_service
 from app.services.audit_service import log_action
 from app.services.campaign_service import CampaignError
+from app.services.send_service import SendError
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
@@ -230,8 +235,64 @@ def cancel_campaign(
     campaign = _get_campaign_or_404(db, user.id, campaign_id)
     try:
         campaign = campaign_service.cancel_campaign(db, user.id, campaign)
+        if campaign.status == "CANCELLED":
+            # Cancel any in-flight send job too - no new messages.
+            send_service.cancel_send_job(db, user.id, campaign)
     except CampaignError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     db.commit()
     db.refresh(campaign)
     return _serialize_campaign(db, campaign)
+
+
+# --- Sending (Phase 2) ---
+
+
+@router.post("/{campaign_id}/send", response_model=CampaignSendOut, status_code=202)
+def send_campaign(
+    campaign_id: int,
+    payload: CampaignSendRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Start sending a READY campaign through a connected device.
+
+    Opt-outs are re-checked at this moment, a send queue is created, and
+    the first batch is dispatched to the device. Results arrive
+    asynchronously and are recorded only when the device reports them.
+    """
+    campaign = _get_campaign_or_404(db, user.id, campaign_id)
+    device = DeviceRepository(db).get(user.id, payload.device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    try:
+        job, counts = send_service.start_campaign_send(db, user.id, campaign, device)
+        dispatched = send_service.dispatch_next_batch(db, job)
+    except SendError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    db.commit()
+    db.refresh(job)
+    return CampaignSendOut(
+        job_id=job.id,
+        campaign_id=campaign.id,
+        device_id=device.id,
+        status=job.status,
+        queued=counts["queued"],
+        skipped_opted_out=counts["skipped_opted_out"],
+        skipped_invalid=counts["skipped_invalid"],
+        message=(
+            f"Campaign queued on {device.device_name}: {counts['queued']} message(s). "
+            f"First batch dispatched: {dispatched}."
+        ),
+    )
+
+
+@router.get("/{campaign_id}/progress", response_model=CampaignProgressOut)
+def campaign_progress(
+    campaign_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Real-time progress of a campaign send (polled by the dashboard)."""
+    campaign = _get_campaign_or_404(db, user.id, campaign_id)
+    return CampaignProgressOut(**send_service.campaign_progress(db, user.id, campaign))

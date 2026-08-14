@@ -1,19 +1,31 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Copy, ListChecks, Pause, Play, Send, Trash2, XCircle } from 'lucide-react'
+import {
+  ArrowLeft,
+  Copy,
+  ListChecks,
+  Pause,
+  Play,
+  Send,
+  Smartphone,
+  Trash2,
+  XCircle,
+} from 'lucide-react'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Badge, StatusBadge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Card, CardBody, CardHeader } from '../components/ui/Card'
 import { ConfirmDialog } from '../components/ui/Modal'
+import { Modal } from '../components/ui/Modal'
 import { EmptyState } from '../components/ui/EmptyState'
 import { Alert, Spinner } from '../components/ui/Misc'
 import { Table, Td, Th, THead, TRow } from '../components/ui/Table'
 import { useToast } from '../components/ui/Toast'
 import { getErrorMessage } from '../lib/api'
-import { formatDateTime, formatNumber } from '../lib/format'
-import { campaignsApi } from '../services/api'
-import type { CampaignValidationReport } from '../types'
+import { formatDateTime, formatNumber, timeAgo } from '../lib/format'
+import { campaignsApi, devicesApi } from '../services/api'
+import type { CampaignValidationReport, Device } from '../types'
+import { cn } from '../lib/cn'
 
 export function CampaignDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -24,6 +36,9 @@ export function CampaignDetailPage() {
   const [deleting, setDeleting] = useState(false)
   const [validating, setValidating] = useState(false)
   const [report, setReport] = useState<CampaignValidationReport | null>(null)
+  const [sendModalOpen, setSendModalOpen] = useState(false)
+  const [selectedDevice, setSelectedDevice] = useState<Device | null>(null)
+  const [sending, setSending] = useState(false)
 
   const { data: campaign, isLoading, isError } = useQuery({
     queryKey: ['campaign', id],
@@ -31,11 +46,28 @@ export function CampaignDetailPage() {
     enabled: !!id,
   })
 
+  const isSending = campaign?.status === 'RUNNING' || campaign?.status === 'PAUSED'
+
+  const { data: progress } = useQuery({
+    queryKey: ['campaign-progress', id],
+    queryFn: () => campaignsApi.progress(Number(id)),
+    enabled: !!id && isSending,
+    refetchInterval: isSending ? 4000 : false,
+  })
+
+  const { data: devices } = useQuery({
+    queryKey: ['devices'],
+    queryFn: devicesApi.list,
+    enabled: sendModalOpen || campaign?.status === 'READY',
+    refetchInterval: 8000,
+  })
+
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['campaign', id] })
     queryClient.invalidateQueries({ queryKey: ['campaigns'] })
     queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     queryClient.invalidateQueries({ queryKey: ['messages'] })
+    queryClient.invalidateQueries({ queryKey: ['campaign-progress'] })
   }
 
   const runAction = async (action: 'duplicate' | 'pause' | 'resume' | 'cancel' | 'ready') => {
@@ -52,6 +84,22 @@ export function CampaignDetailPage() {
       refresh()
     } catch (err) {
       error(getErrorMessage(err, 'Action failed'))
+    }
+  }
+
+  const startSend = async () => {
+    if (!campaign || !selectedDevice) return
+    setSending(true)
+    try {
+      const result = await campaignsApi.send(campaign.id, selectedDevice.id)
+      success(result.message)
+      setSendModalOpen(false)
+      setSelectedDevice(null)
+      refresh()
+    } catch (err) {
+      error(getErrorMessage(err, 'Could not start the campaign'))
+    } finally {
+      setSending(false)
     }
   }
 
@@ -98,6 +146,7 @@ export function CampaignDetailPage() {
   }
 
   const canEdit = campaign.status === 'DRAFT'
+  const connectedDevices = devices?.filter((d) => d.is_online) ?? []
 
   return (
     <div className="mx-auto max-w-5xl animate-fade-in">
@@ -123,9 +172,11 @@ export function CampaignDetailPage() {
               <ListChecks className="h-4 w-4" /> Validate
             </Button>
           )}
-          <Button variant="outline" onClick={() => runAction('duplicate')}>
-            <Copy className="h-4 w-4" /> Duplicate
-          </Button>
+          {campaign.status === 'READY' && (
+            <Button onClick={() => setSendModalOpen(true)}>
+              <Send className="h-4 w-4" /> Send Campaign
+            </Button>
+          )}
           {['READY', 'RUNNING', 'SCHEDULED'].includes(campaign.status) && (
             <Button variant="outline" onClick={() => runAction('pause')}>
               <Pause className="h-4 w-4" /> Pause
@@ -141,6 +192,9 @@ export function CampaignDetailPage() {
               <XCircle className="h-4 w-4" /> Cancel
             </Button>
           )}
+          <Button variant="outline" onClick={() => runAction('duplicate')}>
+            <Copy className="h-4 w-4" /> Duplicate
+          </Button>
           <Button variant="danger" onClick={() => setDeleteOpen(true)}>
             <Trash2 className="h-4 w-4" /> Delete
           </Button>
@@ -155,6 +209,47 @@ export function CampaignDetailPage() {
         </div>
       )}
 
+      {isSending && (
+        <Card className="mb-6 border-brand-200 dark:border-brand-500/30">
+          <CardBody>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Send progress</h3>
+                {progress?.device_name && (
+                  <Badge tone="gray">
+                    <Smartphone className="h-3 w-3" /> {progress.device_name}
+                    {progress.device_connection_status && ` · ${progress.device_connection_status.toLowerCase()}`}
+                  </Badge>
+                )}
+                {progress?.job_status && <StatusBadge status={progress.job_status} />}
+              </div>
+              <p className="text-xs text-zinc-400">
+                {progress ? `${formatNumber(progress.sent + progress.failed + progress.skipped + progress.opted_out)} / ${formatNumber(progress.total)}` : '…'}
+                {campaign.status === 'PAUSED' && <span className="ml-2 text-amber-600">paused — no new sends until resumed</span>}
+              </p>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+              <div
+                className="h-full rounded-full bg-brand-500 transition-all duration-700"
+                style={{ width: `${Math.round((progress?.progress ?? 0) * 100)}%` }}
+              />
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-7">
+              <ProgressStat label="Pending" value={progress?.pending ?? 0} />
+              <ProgressStat label="Queued" value={progress?.queued ?? 0} />
+              <ProgressStat label="Processing" value={progress?.processing ?? 0} tone="text-blue-600" />
+              <ProgressStat label="Sent" value={progress?.sent ?? 0} tone="text-emerald-600" />
+              <ProgressStat label="Failed" value={progress?.failed ?? 0} tone={progress?.failed ? 'text-red-600' : ''} />
+              <ProgressStat label="Skipped" value={progress?.skipped ?? 0} />
+              <ProgressStat label="Opted out" value={progress?.opted_out ?? 0} tone={progress?.opted_out ? 'text-amber-600' : ''} />
+            </div>
+            {progress && progress.progress === 1 && progress.campaign_status !== 'COMPLETED' && (
+              <p className="mt-3 text-xs text-zinc-400">All recipients reached a terminal state.</p>
+            )}
+          </CardBody>
+        </Card>
+      )}
+
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           <Card>
@@ -167,7 +262,11 @@ export function CampaignDetailPage() {
                 <Alert tone="info">
                   {campaign.status === 'DRAFT'
                     ? 'This campaign is a draft. Validate it to generate personalized messages and mark it READY.'
-                    : 'This campaign is prepared and validated. Sending starts in Phase 2 when an Android device is connected.'}
+                    : campaign.status === 'READY'
+                      ? 'This campaign is validated and ready. Choose a connected device to start sending.'
+                      : campaign.status === 'RUNNING'
+                        ? 'Sending is in progress. Only the Android device\'s reported results change message states.'
+                        : 'This campaign is prepared. No SMS is sent without a connected device.'}
                 </Alert>
               </div>
             </CardBody>
@@ -229,10 +328,12 @@ export function CampaignDetailPage() {
               <dl className="space-y-3">
                 <SummaryRow label="Total recipients" value={formatNumber(campaign.recipient_count)} />
                 <SummaryRow label="Pending" value={formatNumber(campaign.pending_count)} />
-                <SummaryRow label="Opted out (skipped)" value={formatNumber(campaign.opted_out_count)} />
+                <SummaryRow label="Queued" value={formatNumber(campaign.queued_count)} />
+                <SummaryRow label="Processing" value={formatNumber(campaign.processing_count)} />
+                <SummaryRow label="Sent" value={formatNumber(campaign.sent_count)} />
+                <SummaryRow label="Failed" value={formatNumber(campaign.failed_count)} />
                 <SummaryRow label="Skipped" value={formatNumber(campaign.skipped_count)} />
-                <SummaryRow label="Sent" value={formatNumber(campaign.sent_count)} note="Phase 2" />
-                <SummaryRow label="Failed" value={formatNumber(campaign.failed_count)} note="Phase 2" />
+                <SummaryRow label="Opted out" value={formatNumber(campaign.opted_out_count)} />
               </dl>
             </CardBody>
           </Card>
@@ -257,18 +358,88 @@ export function CampaignDetailPage() {
             </CardBody>
           </Card>
 
-          <Card className="border-amber-200 dark:border-amber-500/30">
-            <CardBody>
-              <div className="flex items-start gap-2.5">
-                <Badge tone="amber">Phase 1</Badge>
-                <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-                  No SMS has been sent from this campaign. Sending requires a connected Android device, which arrives in Phase 2.
-                </p>
-              </div>
-            </CardBody>
-          </Card>
+          {progress?.device_name && (
+            <Card>
+              <CardHeader title="Sending device" />
+              <CardBody>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{progress.device_name}</p>
+                    <p className="text-xs text-zinc-400">{timeAgo(campaign.updated_at)} since last update</p>
+                  </div>
+                  {progress.device_connection_status && <StatusBadge status={progress.device_connection_status} />}
+                </div>
+              </CardBody>
+            </Card>
+          )}
         </div>
       </div>
+
+      {/* Device selection for sending */}
+      <Modal
+        open={sendModalOpen}
+        onClose={() => setSendModalOpen(false)}
+        title="Send Campaign"
+        description="Choose the Android device that will send the messages through its SIM."
+        size="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setSendModalOpen(false)}>Cancel</Button>
+            <Button onClick={startSend} disabled={!selectedDevice} loading={sending}>
+              <Send className="h-4 w-4" /> Start sending
+            </Button>
+          </>
+        }
+      >
+        {devices && devices.length === 0 ? (
+          <EmptyState
+            icon={Smartphone}
+            title="No Android device connected"
+            description="Pair a device on the Devices page before sending this campaign."
+            action={
+              <Link to="/devices"><Button variant="outline">Go to Devices</Button></Link>
+            }
+          />
+        ) : (
+          <div className="space-y-2">
+            {connectedDevices.length === 0 && (
+              <Alert tone="warning">No device is online right now. Connect the Android app before sending.</Alert>
+            )}
+            {devices?.map((device) => (
+              <label
+                key={device.id}
+                className={cn(
+                  'flex cursor-pointer items-center justify-between gap-3 rounded-lg border px-4 py-3 transition-colors',
+                  selectedDevice?.id === device.id
+                    ? 'border-brand-500 bg-brand-50/50 dark:border-brand-500 dark:bg-brand-500/10'
+                    : 'border-zinc-200 hover:border-zinc-300 dark:border-zinc-700 dark:hover:border-zinc-600',
+                  !device.is_online && 'opacity-60',
+                )}
+              >
+                <div className="flex items-center gap-3">
+                  <input
+                    type="radio"
+                    name="device"
+                    checked={selectedDevice?.id === device.id}
+                    disabled={!device.is_online}
+                    onChange={() => setSelectedDevice(device)}
+                    className="h-4 w-4 accent-brand-600"
+                  />
+                  <div>
+                    <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{device.device_name}</p>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                      {device.phone_model ?? 'Model unknown'}
+                      {device.battery_level !== null && ` · Battery ${device.battery_level}%`}
+                      {device.sim_state && ` · SIM ${device.sim_state}`}
+                    </p>
+                  </div>
+                </div>
+                <StatusBadge status={device.is_online ? 'CONNECTED' : device.connection_status} />
+              </label>
+            ))}
+          </div>
+        )}
+      </Modal>
 
       <ConfirmDialog
         open={deleteOpen}
@@ -276,8 +447,17 @@ export function CampaignDetailPage() {
         onConfirm={removeCampaign}
         loading={deleting}
         title="Delete campaign"
-        message={<>Delete campaign <strong>{campaign.name}</strong>? This removes its recipients and message logs.</>}
+        message={<>Delete campaign <strong>{campaign.name}</strong>? This removes its recipients, send queue and message logs.</>}
       />
+    </div>
+  )
+}
+
+function ProgressStat({ label, value, tone = '' }: { label: string; value: number; tone?: string }) {
+  return (
+    <div className="rounded-lg border border-zinc-100 px-2 py-1.5 dark:border-zinc-800">
+      <p className={`text-sm font-bold ${tone || 'text-zinc-800 dark:text-zinc-100'}`}>{value}</p>
+      <p className="text-[10px] font-semibold tracking-wide text-zinc-400 uppercase">{label}</p>
     </div>
   )
 }

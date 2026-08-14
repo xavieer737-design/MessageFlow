@@ -94,6 +94,8 @@ export interface Campaign {
   sent_count: number
   failed_count: number
   pending_count: number
+  queued_count: number
+  processing_count: number
   skipped_count: number
   opted_out_count: number
   recipients: CampaignRecipient[]
@@ -144,9 +146,73 @@ export interface Device {
   device_identifier: string
   platform: string
   connection_status: string
+  public_key: string | null
+  paired_at: string | null
+  phone_model: string | null
+  android_version: string | null
+  app_version: string | null
+  battery_level: number | null
+  sim_state: string | null
+  network_state: string | null
   last_seen: string | null
   created_at: string
   updated_at: string
+  messages_queued: number
+  messages_sent: number
+  messages_failed: number
+  is_online: boolean
+}
+
+export interface PairingStart {
+  session_id: number
+  token: string
+  qr_payload: string
+  expires_at: string
+}
+
+export interface PairingStatus {
+  session_id: number
+  status: 'pending' | 'expired' | 'paired'
+  expires_at: string | null
+  device: Device | null
+}
+
+export interface TestMessageResult {
+  message_id: string
+  status: string
+  phone: string
+  error: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface CampaignSendResult {
+  job_id: number
+  campaign_id: number
+  device_id: number
+  status: string
+  queued: number
+  skipped_opted_out: number
+  skipped_invalid: number
+  message: string
+}
+
+export interface CampaignProgress {
+  campaign_id: number
+  campaign_status: CampaignStatus
+  job_status: string | null
+  device_id: number | null
+  device_name: string | null
+  device_connection_status: string | null
+  total: number
+  pending: number
+  queued: number
+  processing: number
+  sent: number
+  failed: number
+  skipped: number
+  opted_out: number
+  progress: number
 }
 
 export interface MessageLog {

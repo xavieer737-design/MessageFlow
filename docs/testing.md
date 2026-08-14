@@ -7,7 +7,7 @@ cd backend
 ../.venv/bin/python -m pytest tests/ -q
 ```
 
-93 tests across:
+132 tests across:
 
 | File | Covers |
 | --- | --- |
@@ -20,6 +20,9 @@ cd backend
 | `test_optouts.py` | add/normalize/duplicate/search/delete, bulk add, CSV import, export, isolation |
 | `test_groups_dashboard.py` | group CRUD, name conflicts, membership add/remove, group-filtered contact list, dashboard stats from real data, activity feed |
 | `test_devices.py` | registration (never claims connected), identifier conflicts, heartbeat, mismatch 403, delete, isolation |
+| `test_phase2_pairing.py` | token generation, QR payload contents (no secrets), hash-only storage, expiry (410), single-use replay (409), detail mismatch, status polling, session isolation, key update on re-pair |
+| `test_phase2_ws_auth.py` | full challenge/response auth, wrong token/signature/device_id rejection, impersonation block (leaked token + wrong key), CONNECTED only after auth, OFFLINE on close, WS heartbeat telemetry, REST heartbeat (no connectivity claim), STOP keyword opt-out, non-STOP ignored |
+| `test_phase2_send_engine.py` | start-send queueing (message ids, idempotency keys), READY-only + paired-device-only gating, opt-out recheck at send time, batching + pacing, offline no-dispatch, next-batch flow, SEND_SUCCESS/SEND_FAILED handling + MessageLog entries, duplicate-result idempotency, no redispatch after success, lost-result redispatch with same message_id, completion, pause/resume/cancel, offline sweep + auto-pause, test message + result polling, multi-user isolation |
 
 Tests run against an in-memory SQLite database (same SQLAlchemy models) —
 no services required. To run against PostgreSQL instead:

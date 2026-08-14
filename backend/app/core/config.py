@@ -51,6 +51,35 @@ class Settings(BaseSettings):
     RATE_LIMIT_AUTH: str = "10/minute"
     RATE_LIMIT_IMPORT: str = "10/minute"
 
+    # --- Devices / pairing (Phase 2) ---
+    # How long a pairing session stays valid (QR token).
+    PAIRING_TOKEN_TTL_MINUTES: int = 5
+    # How long a device JWT (WS auth) stays valid.
+    DEVICE_TOKEN_EXPIRE_DAYS: int = 30
+    # A device is marked OFFLINE when no heartbeat/WS traffic arrives
+    # within this many seconds.
+    DEVICE_OFFLINE_TIMEOUT_SECONDS: int = 60
+    # Device WebSocket ping interval used to keep connections alive.
+    DEVICE_WS_PING_SECONDS: int = 25
+
+    # --- Sending (Phase 2) ---
+    # Number of recipients dispatched per batch to the Android device.
+    SEND_BATCH_SIZE: int = 5
+    # Pacing: maximum messages dispatched per minute per device.
+    # Conservative default; adjust to your carrier's acceptable policy.
+    SEND_RATE_PER_MINUTE: int = 20
+    # Enables the background dispatch loop (tests disable it).
+    SEND_DISPATCH_ENABLED: bool = True
+    # Automatic pause of the campaign when the paired device goes OFFLINE
+    # during an active send job.
+    PAUSE_CAMPAIGN_ON_DEVICE_OFFLINE: bool = True
+    # Stop-keyword handling for inbound SMS forwarded by the device.
+    STOP_KEYWORDS: str = "STOP,UNSUBSCRIBE,CANCEL,END,QUIT,STOPALL"
+    # If true, a single confirmation reply is queued to the sender after a
+    # STOP keyword is processed. Default OFF: never auto-reply.
+    STOP_AUTO_REPLY_ENABLED: bool = False
+    STOP_AUTO_REPLY_TEXT: str = "You have been unsubscribed from future messages."
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def parse_cors_origins(cls, v):

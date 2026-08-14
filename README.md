@@ -2,11 +2,13 @@
 
 **Prepare consent-based bulk SMS campaigns — desktop-first web app.**
 Import contacts, organize groups, personalize templates, validate campaigns,
-maintain opt-out lists — and later send through a real Android phone's SIM.
+maintain opt-out lists — and send through a real Android phone's SIM.
 
-> **Phase 1 status:** Everything up to *sending* is implemented. Campaigns can be
-> prepared, validated and marked READY, but **no SMS is ever sent and no delivery
-> status is ever fabricated**. Android pairing arrives in Phase 2.
+> **Phase 2 status:** Android companion app, secure QR pairing, WebSocket
+> device channel and the server-controlled send engine are implemented.
+> **Android SMS sending is implemented but requires device testing** — the
+> system never marks a message SENT unless the Android device reports
+> `SmsManager` success, and no fake delivery data exists anywhere.
 
 ---
 
@@ -14,6 +16,12 @@ maintain opt-out lists — and later send through a real Android phone's SIM.
 
 - 🔐 Secure authentication (bcrypt password hashing, JWT in httpOnly cookies,
   per-user data isolation, rate limiting)
+- 📱 **Phase 2 — real Android sending:** QR pairing (one-time tokens, RSA
+  device identity from Android Keystore), authenticated WebSocket channel
+  with challenge-response, heartbeat/telemetry, server-controlled send
+  queue with batching + pacing, opt-out re-check at send time, idempotent
+  delivery (no double SMS on reconnect), live campaign progress, test SMS,
+  STOP/UNSUBSCRIBE keyword handling, pause/resume/cancel
 - 👥 Contact management — add / edit / delete / search / filter / sort /
   paginate / multi-select / bulk delete / export (CSV & XLSX)
 - 📥 Real CSV & XLSX import — column detection, smart `name → first_name`
@@ -43,12 +51,19 @@ maintain opt-out lists — and later send through a real Android phone's SIM.
 │  Tailwind · TanStack   │ proxy  │  Alembic · PostgreSQL   │
 │  Query · React Router  │        │  pandas · openpyxl      │
 └────────────────────────┘        └───────────┬─────────────┘
-                                              │
+                                              │ WSS /api/devices/ws
                                     ┌─────────▼─────────┐
-                                    │  PostgreSQL        │
-                                    │  (12 tables)       │
+                                    │  Android app      │  (android/)
+                                    │  Kotlin · Compose │
+                                    │  SmsManager → SIM │
                                     └───────────────────┘
 ```
+
+Phase 2 adds the `android/` companion app: it pairs via QR, connects over an
+authenticated WebSocket, receives batches of recipients, sends them with
+Android's official `SmsManager` API, and reports the real results back.
+The backend is the coordination layer — the web dashboard never touches the
+phone's SMS stack.
 
 Layering inside the backend keeps business logic out of the API routes:
 
@@ -69,16 +84,20 @@ app/db/              → engine/session
 │   └── src/
 │       ├── components/ui/   design-system kit (Button, Card, Modal, Table, …)
 │       ├── components/layout/  Sidebar, Topbar
+│       ├── components/devices/  PairingModal (QR), TestSmsModal
 │       ├── pages/         all screens (Contacts, Campaigns, Wizard, …)
 │       ├── services/      typed API client functions
 │       ├── lib/           api client, SMS counter, template vars, formatting
 │       └── hooks/         useAuth, useTheme, …
 ├── backend/
 │   ├── app/              FastAPI application (api, services, repositories, …)
-│   ├── alembic/          migrations (initial schema included)
-│   ├── tests/            93 pytest tests
+│   │   ├── services/send_service.py   Phase 2 send engine
+│   │   └── services/pairing_service.py, connection_manager.py
+│   ├── alembic/          migrations (initial + Phase 2)
+│   ├── tests/            132 pytest tests
 │   └── scripts/seed.py   optional demo data
-├── docs/                 architecture, API reference, testing, Phase 2 plan
+├── android/             Kotlin/Compose companion app (Phase 2)
+├── docs/                architecture, API, testing, Android setup, Phase 2
 └── .env.example
 ```
 
@@ -89,6 +108,7 @@ app/db/              → engine/session
 | Python  | ≥ 3.11             |                                         |
 | Node.js | ≥ 20               |                                         |
 | PostgreSQL | ≥ 14           | Any recent version works                |
+| Android Studio | Hedgehog+ | only needed for the `android/` app      |
 
 ## Installation
 
@@ -122,6 +142,12 @@ cp .env.example .env
 | `DEFAULT_REGION` | region used for numbers without `+` prefix (default `IN`) |
 | `MAX_UPLOAD_MB` / `UPLOAD_DIR` | import upload limits / staging dir |
 | `RATE_LIMIT_AUTH` / `RATE_LIMIT_IMPORT` | slowapi limits |
+| `PAIRING_TOKEN_TTL_MINUTES` / `DEVICE_TOKEN_EXPIRE_DAYS` | pairing + device token lifetimes |
+| `DEVICE_OFFLINE_TIMEOUT_SECONDS` / `DEVICE_WS_PING_SECONDS` | device liveness |
+| `SEND_BATCH_SIZE` / `SEND_RATE_PER_MINUTE` | send batching + pacing |
+| `SEND_DISPATCH_ENABLED` | background dispatch/offline loops |
+| `PAUSE_CAMPAIGN_ON_DEVICE_OFFLINE` | auto-pause on device disconnect |
+| `STOP_KEYWORDS` / `STOP_AUTO_REPLY_ENABLED` | STOP/UNSUBSCRIBE handling |
 
 Never commit real secrets — only `.env.example` lives in the repository.
 
@@ -230,9 +256,12 @@ Full request/response reference: [`docs/api.md`](docs/api.md).
 
 ## Database tables
 
-`users`, `contacts`, `contact_groups`, `contact_group_members`,
+Phase 1: `users`, `contacts`, `contact_groups`, `contact_group_members`,
 `message_templates`, `campaigns`, `campaign_recipients`, `devices`,
-`message_logs`, `opt_outs`, `audit_logs`, `alembic_version`.
+`message_logs`, `opt_outs`, `audit_logs`.
+
+Phase 2 (migration `9bfd64b68082`): `pairing_sessions`, `send_jobs`,
+`message_attempts` + device telemetry/public-key columns.
 
 Phone numbers are unique per user (`uq_contact_user_phone`); opt-outs are
 unique per user+phone; every table is indexed on `user_id`.
@@ -263,19 +292,27 @@ Built for legitimate, consent-based messaging:
   reports — the future Android app will use official Android SMS APIs with
   the user's consent and granted permissions.
 
-## Current limitations (Phase 1)
+## Current limitations (Phase 2)
 
-- No SMS sending — campaigns stop at READY.
-- No device connectivity, battery/SIM info, or delivery reports (nothing fabricated).
+- **Android SMS sending implemented but requires device testing.** No
+  physical-device test has been run in the development sandbox.
+- No carrier delivery receipts — the UI says "sent" only on device-reported
+  `SmsManager` success, never "delivered".
 - No scheduled sending execution (`scheduled_at` is stored only).
-- No STOP/UNSUBSCRIBE reply processing yet (opt-out import/manual add ready).
-- Email is a contact field, not an identity.
+- STOP handling needs the optional `RECEIVE_SMS` permission + toggle; auto
+  reply is off by default.
+- Google Play restricts SMS permissions for non-core-SMS apps (sideload
+  builds unaffected).
+- Test messages are limited to one at a time through a connected device.
 - Upload staging files are cleaned after confirm; orphaned uploads expire on server restart.
 
-## Future Android integration (Phase 2)
+## Phase 2 setup at a glance
 
-See [`docs/phase-2-android.md`](docs/phase-2-android.md) for the full plan:
-companion Android app using the official SMS Manager API, WebSocket
-pairing with QR code, heartbeat, per-campaign send queues, delivery status
-callbacks, and per-number rate limiting. The API surface (`devices`,
-`heartbeat`, `MessageLog`, campaign states) is already prepared for it.
+1. `alembic upgrade head` (adds pairing/send tables).
+2. Backend + frontend as usual.
+3. Build/install the Android app (`android/`) — see
+   [`docs/android-setup.md`](docs/android-setup.md).
+4. Devices → Connect Android Device → scan QR with the app → device
+   appears CONNECTED.
+5. Test SMS / run campaigns. See the full Phase 2 documentation in
+   [`docs/phase-2-android.md`](docs/phase-2-android.md).

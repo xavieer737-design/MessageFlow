@@ -43,11 +43,17 @@ class CampaignRecipient(Base):
     contact_id: Mapped[int | None] = mapped_column(
         ForeignKey("contacts.id", ondelete="SET NULL"), index=True
     )
+    contact: Mapped["Contact | None"] = relationship("Contact")
     # The personalized message generated for this specific recipient.
     personalized_message: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default="PENDING", index=True, nullable=False)
     # Reason when SKIPPED / OPTED_OUT / FAILED (e.g. "invalid phone", "opted out").
     error: Mapped[str | None] = mapped_column(String(500))
+    # Phase 2 send bookkeeping.
+    message_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    queued_at: Mapped[datetime | None] = utc_datetime_column(nullable=True)
+    sent_at: Mapped[datetime | None] = utc_datetime_column(nullable=True)
+    attempt_count: Mapped[int] = mapped_column(default=0, nullable=False)
     created_at: Mapped[datetime] = utc_datetime_column()
     updated_at: Mapped[datetime] = utc_datetime_column(onupdate=utcnow)
 

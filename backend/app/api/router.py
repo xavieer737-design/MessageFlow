@@ -8,6 +8,7 @@ from app.api.routes import (
     contacts,
     dashboard,
     devices,
+    devices_ws,
     groups,
     messages,
     optouts,
@@ -21,6 +22,7 @@ api_router.include_router(groups.router)
 api_router.include_router(templates.router)
 api_router.include_router(campaigns.router)
 api_router.include_router(devices.router)
+api_router.include_router(devices_ws.router)
 api_router.include_router(messages.router)
 api_router.include_router(optouts.router)
 api_router.include_router(dashboard.router)

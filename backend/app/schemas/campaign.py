@@ -48,6 +48,10 @@ class CampaignRecipientOut(BaseModel):
     personalized_message: str | None
     status: str
     error: str | None
+    message_id: str | None = None
+    queued_at: datetime | None = None
+    sent_at: datetime | None = None
+    attempt_count: int = 0
     created_at: datetime
     updated_at: datetime
 
@@ -71,8 +75,10 @@ class CampaignOut(BaseModel):
     sent_count: int = 0
     failed_count: int = 0
     pending_count: int = 0
+    queued_count: int = 0
     skipped_count: int = 0
     opted_out_count: int = 0
+    processing_count: int = 0
     recipients: list[CampaignRecipientOut] = Field(default_factory=list)
 
 
@@ -82,6 +88,43 @@ class CampaignListOut(BaseModel):
     page: int
     page_size: int
     pages: int
+
+
+# --- Sending (Phase 2) ---
+
+
+class CampaignSendRequest(BaseModel):
+    device_id: int
+
+
+class CampaignSendOut(BaseModel):
+    job_id: int
+    campaign_id: int
+    device_id: int
+    status: str
+    queued: int
+    skipped_opted_out: int
+    skipped_invalid: int
+    message: str
+
+
+class CampaignProgressOut(BaseModel):
+    campaign_id: int
+    campaign_status: str
+    job_status: str | None = None
+    device_id: int | None = None
+    device_name: str | None = None
+    device_connection_status: str | None = None
+    total: int
+    pending: int
+    queued: int
+    processing: int
+    sent: int
+    failed: int
+    skipped: int
+    opted_out: int
+    # 0..1 fraction of recipients that reached a terminal state.
+    progress: float = 0.0
 
 
 # --- Validation ---
