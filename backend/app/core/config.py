@@ -5,9 +5,10 @@ variables or a `.env` file at the repository root or in /backend.
 """
 
 from functools import lru_cache
+from typing import Annotated
 
 from pydantic import field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -36,7 +37,12 @@ class Settings(BaseSettings):
     COOKIE_SAMESITE: str = "lax"
 
     # --- CORS ---
-    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    # NoDecode: the value is a comma-separated string in .env, parsed by
+    # parse_cors_origins below (without it pydantic-settings tries JSON).
+    CORS_ORIGINS: Annotated[list[str], NoDecode] = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
 
     # --- Validation ---
     # Default region used when a phone number has no international
