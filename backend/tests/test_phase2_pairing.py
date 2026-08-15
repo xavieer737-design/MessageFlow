@@ -183,3 +183,36 @@ def test_repairing_same_device_updates_key(user_client):
     devices = user_client.get("/api/devices").json()
     assert len(devices) == 1
     assert devices[0]["public_key"] == second_identity.public_key_pem
+
+
+def test_qr_server_url_uses_forwarded_host(user_client):
+    """Behind the Vite dev proxy / a reverse proxy, the QR must carry the
+    address the browser used - not the proxy's upstream target.
+
+    Regression: changeOrigin rewrites Host to 127.0.0.1:8000, which a phone
+    resolves to itself, so pairing could never connect.
+    """
+    response = user_client.post(
+        "/api/devices/pairing/start",
+        json={"device_name": "Pixel 8", "device_identifier": "android-id-1234567890"},
+        headers={"X-Forwarded-Host": "192.168.1.50:5173", "X-Forwarded-Proto": "http"},
+    )
+    assert response.status_code == 200
+    qr = json.loads(response.json()["qr_payload"])
+    assert qr["server"] == "http://192.168.1.50:5173"
+
+
+def test_qr_server_url_respects_explicit_setting(user_client, monkeypatch):
+    """PUBLIC_SERVER_URL always wins - required when the phone reaches the
+    backend through an address the request itself never sees."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "PUBLIC_SERVER_URL", "https://sms.example.com")
+    response = user_client.post(
+        "/api/devices/pairing/start",
+        json={"device_name": "Pixel 8", "device_identifier": "android-id-1234567890"},
+        headers={"X-Forwarded-Host": "192.168.1.50:5173"},
+    )
+    assert response.status_code == 200
+    qr = json.loads(response.json()["qr_payload"])
+    assert qr["server"] == "https://sms.example.com"

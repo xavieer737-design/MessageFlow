@@ -17,6 +17,7 @@ from app.schemas.device import (
     TestMessageRequest,
     TestMessageResult,
 )
+from app.core.config import settings
 from app.services import send_service
 from app.services.audit_service import log_action
 from app.services.connection_manager import connection_manager
@@ -76,6 +77,33 @@ def register_device(
 # --- Pairing (Phase 2) ---
 
 
+def _public_server_url(request: Request) -> str:
+    """The base URL the phone should use to reach this backend.
+
+    Priority:
+    1. ``PUBLIC_SERVER_URL`` - explicit and always correct.
+    2. ``X-Forwarded-Proto``/``X-Forwarded-Host`` - set by reverse proxies
+       (and by the Vite dev proxy, see frontend/vite.config.ts).
+    3. The request base URL.
+
+    Without this, running the dashboard through the Vite dev proxy embeds
+    ``http://127.0.0.1:8000`` in the QR code, which a phone resolves to
+    itself and can never reach.
+    """
+    if settings.PUBLIC_SERVER_URL:
+        return settings.PUBLIC_SERVER_URL
+
+    forwarded_host = request.headers.get("x-forwarded-host")
+    if forwarded_host:
+        host = forwarded_host.split(",")[0].strip()
+        proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+        proto = proto.split(",")[0].strip()
+        if host:
+            return f"{proto}://{host}"
+
+    return str(request.base_url).rstrip("/")
+
+
 @router.post("/pairing/start", response_model=PairingStartOut)
 def pairing_start(
     payload: PairingStartRequest,
@@ -90,7 +118,7 @@ def pairing_start(
             user,
             payload.device_name,
             payload.device_identifier,
-            server_url=str(request.base_url).rstrip("/"),
+            server_url=_public_server_url(request),
         )
     except PairingError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc

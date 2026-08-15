@@ -44,10 +44,13 @@ pairing QR code (the backend injects its own base URL), so:
 - **Local development with a physical phone:**
   1. Find your computer's LAN IP: `ip addr` / `ipconfig`.
   2. Make sure the backend binds `0.0.0.0` (the default run command does).
-  3. The QR payload's `server` comes from the request's base URL. When you
-     open MessageFlow in the browser via `http://192.168.1.50:5173` (not
-     `localhost`), the pairing QR will carry `http://192.168.1.50:8000` and
-     the phone can reach it on the same Wi-Fi.
+  3. Open MessageFlow via `http://192.168.1.50:5173` (not `localhost`). The
+     Vite dev proxy forwards that address to the backend, so the pairing QR
+     carries `http://192.168.1.50:5173` and the phone reaches both the REST
+     API and the WebSocket through the dev server on the same Wi-Fi.
+     If you serve the dashboard some other way, set `PUBLIC_SERVER_URL`
+     (e.g. `http://192.168.1.50:8000`) so the QR always holds an address the
+     phone can resolve - `localhost`/`127.0.0.1` would point it at itself.
   4. Android blocks cleartext HTTP by default. Two options:
      - **Debug builds:** add `android:usesCleartextTraffic="true"` to the
        `<application>` tag or use a `network_security_config.xml` allowing

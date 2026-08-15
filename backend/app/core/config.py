@@ -86,6 +86,23 @@ class Settings(BaseSettings):
     STOP_AUTO_REPLY_ENABLED: bool = False
     STOP_AUTO_REPLY_TEXT: str = "You have been unsubscribed from future messages."
 
+    # --- Pairing / device connectivity ---
+    # Absolute base URL the Android phone should use to reach this backend,
+    # e.g. "http://192.168.1.50:8000" on a LAN or "https://sms.example.com"
+    # in production. It is embedded in the pairing QR code.
+    #
+    # Leave empty to derive it from the incoming request (works when the
+    # browser talks to the backend directly, or through a reverse proxy that
+    # sets X-Forwarded-Host/Proto). Set it explicitly whenever the request
+    # host is not reachable from the phone - notably the Vite dev proxy,
+    # which rewrites Host to 127.0.0.1:8000.
+    PUBLIC_SERVER_URL: str = ""
+
+    @field_validator("PUBLIC_SERVER_URL")
+    @classmethod
+    def strip_trailing_slash(cls, v: str) -> str:
+        return v.strip().rstrip("/")
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def parse_cors_origins(cls, v):

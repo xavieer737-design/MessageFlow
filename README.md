@@ -142,6 +142,7 @@ cp .env.example .env
 | `DEFAULT_REGION` | region used for numbers without `+` prefix (default `IN`) |
 | `MAX_UPLOAD_MB` / `UPLOAD_DIR` | import upload limits / staging dir |
 | `RATE_LIMIT_AUTH` / `RATE_LIMIT_IMPORT` | slowapi limits |
+| `PUBLIC_SERVER_URL` | base URL embedded in the pairing QR (set for LAN/production; empty = derive from request) |
 | `PAIRING_TOKEN_TTL_MINUTES` / `DEVICE_TOKEN_EXPIRE_DAYS` | pairing + device token lifetimes |
 | `DEVICE_OFFLINE_TIMEOUT_SECONDS` / `DEVICE_WS_PING_SECONDS` | device liveness |
 | `SEND_BATCH_SIZE` / `SEND_RATE_PER_MINUTE` | send batching + pacing |
